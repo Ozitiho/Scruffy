@@ -1,0 +1,316 @@
+'use strict';
+
+let fs = require('fs');
+let	mime = require('mime');
+let	path = require('path');
+let gm = require('gm').subClass({imageMagick: true});
+let http = require('needle');
+let url = require('url');
+let _ = require('lodash');
+
+let rootImagesFolder = loopback.get('rootImagesFolder') ? loopback.get('rootImagesFolder') : '/images';
+let allowedExtentions = loopback.get('allowedExtentions');
+
+module.exports = function(Image) {
+	Image.get = (folder, image, req, cb) => {
+		return new Promise((resolve, reject) => {
+			if(!fs.existsSync(rootImagesFolder)) {
+				let err = new Error("Base path does not exist, create it before running. (" + rootImagesFolder + ")")
+				err.status = 500;
+				return reject(err);
+			}
+
+			var imageSplit = image.split('.');
+			var imageExtension = imageSplit[(imageSplit.length-1)];
+			var imageName = imageSplit.slice(0, -1).join('.');
+
+			var imagePath = folder + '/' + image;
+			var fullPath = path.resolve(rootImagesFolder, imagePath);
+
+			if(!fs.existsSync(fullPath)) {
+				let err = new Error("Image does not exist.")
+				err.status = 404;
+				return reject(err);
+			}
+
+
+			var mimeType = mime.lookup(fullPath);
+			if(imageExtension.toLowerCase() === 'gif') {
+				fs.readFile(fullPath, (err, data) => {
+					if(err) {
+						return reject(err);
+					}
+					return cb(null, data, mimeType);
+				});
+			}
+			else {
+				let returnImage = gm(fullPath);
+				if(req.hasOwnProperty('query')) {
+					_.forOwn(req.query, (value, key) => {
+						if(typeof returnImage[key] === 'function') {
+							returnImage[key].call(returnImage, ...value.split(','));
+						}
+					});
+				}
+
+				returnImage.toBuffer(mime.extension(mimeType), (err, buffer) => {
+					if(err) {
+						return reject(err);
+					}
+
+					return cb(null, buffer, mimeType);
+				});
+			}
+
+		});
+	};
+
+	Image.download = (folder, name, url, base64, overwrite = false) => {
+		return new Promise((resolve, reject) => {
+			if(!fs.existsSync(rootImagesFolder)) {
+				let err = new Error("Base path does not exist, create it before running. (" + rootImagesFolder + ")")
+				err.status = 500;
+				return reject(err);
+			}
+
+			if(!folder) {
+				let err = new Error("Please provide a folder.");
+				err.status = 406;
+				return reject(err);
+			}
+
+			if(!name) {
+				let err = new Error("Please provide a file name");
+				err.status = 406;
+				return reject(err);
+			}
+
+			if(url || base64) {
+				Image.preCheck(folder, name, overwrite)
+				.then(data => {
+					if(url) {
+						return resolve(Image.downloadUrlImage(url, data));
+					}
+					else if(base64) {
+						return resolve(Image.downloadBase64Image(base64, data));
+					}
+				}, err => reject(err));
+			}
+			else {
+				let err = new Error("Please provide a url or base64 string");
+				err.status = 406;
+				return reject(err);
+			}
+		});
+	};
+
+	Image.preCheck = (folder, name, overwrite) => {
+		return new Promise((resolve, reject) => {
+			if(name.split('.').length <= 1) {
+				let err = new Error("Please provide a full file name (file.extention)");
+				err.status = 406;
+				return reject(err);
+			}
+
+			name = name.split('.');
+			let extention = name.pop().toLowerCase();
+			if(allowedExtentions.indexOf(extention) === -1) {
+				let err = new Error("'" + extention + "' extention is not allowed, please use one of the following: " + allowedExtentions.join(', '));
+				err.status = 406;
+				return reject(err);
+			}
+
+			var directoryLocation = path.resolve(rootImagesFolder, folder);
+			let fileLocation = path.resolve(directoryLocation, (name + '.' + extention));
+			if(fs.existsSync(fileLocation) && !overwrite){
+				let err = new Error("'" + path.resolve(folder, (name + '.' + extention)) + "' already exists.");
+				err.status = 406;
+				return reject(err);
+			}
+
+			if(!fs.existsSync(directoryLocation)){
+				fs.mkdirSync(directoryLocation);
+			}
+
+			return resolve({
+				name: name.join('.'),
+				extention: extention,
+				folder: folder,
+				folderPath: directoryLocation,
+				filePath: fileLocation
+			});
+		});
+	}
+
+	Image.downloadUrlImage = (url, data) => {
+		return new Promise((resolve, reject) => {
+			http.get(url, (err, response) => {
+				fs.writeFile(data.filePath, response.raw, (err) => {
+					if(err) {
+						return reject(err);
+					}
+
+					let fileUrl = data.folder + '/' + data.name + '.' + data.extention;
+					return resolve({url: '/api/image/' + fileUrl});
+				});
+			});
+		});
+	};
+
+	Image.downloadBase64Image = (base64, data) => {
+		return new Promise((resolve, reject) => {
+			if(base64.indexOf('data:image/') !== 0) {
+				let err = new Error("Provided base64 string is not valid.");
+				err.status = 406;
+				return reject(err);
+			}
+
+			let base64Data = base64.split('base64,');
+			fs.writeFile(data.filePath, base64Data[1], 'base64', function(err) {
+				if(err) {
+					return reject(err);
+				}
+
+				let fileUrl = data.folder + '/' + data.name + '.' + data.extention;
+				return resolve({url: '/api/image/' + fileUrl});
+			});
+		});
+	};
+
+	Image.remoteMethod(
+		'get', {
+			accepts: [{
+				arg: 'folder',
+				type: 'string',
+				required: true,
+                http: {
+                    source: 'path'
+                }
+			}, {
+				arg: 'file',
+				type: 'string',
+				required: true,
+                http: {
+                    source: 'path'
+                }
+			}, {
+				arg: 'req',
+				type: 'any',
+				http: (ctx) => {
+					return ctx.req;
+				}
+			}],
+			http: {
+				path: '/:folder/:file',
+				verb: 'get'
+			},
+			returns: [{
+                arg: 'body',
+                type: 'file',
+                root: true
+            }, {
+                arg: 'Content-Type',
+                type: 'string',
+                http: {
+                    target: 'header'
+                }
+            }]
+		}
+	);
+
+	Image.remoteMethod(
+		'download', {
+			accepts: [{
+				arg: 'folder',
+				type: 'string',
+				required: true,
+                http: (ctx) => {
+                	if(!ctx.req.body) {
+                		return;
+                	}
+
+                	if(!ctx.req.body.folder) {
+                		return;
+                	}
+
+					return ctx.req.body.folder;
+				}
+			}, {
+				arg: 'name',
+				type: 'string',
+				required: true,
+                http: (ctx) => {
+                	if(!ctx.req.body) {
+                		return;
+                	}
+
+                	if(!ctx.req.body.name) {
+                		return;
+                	}
+
+					return ctx.req.body.name;
+				}
+			}, {
+				arg: 'url',
+				type: 'string',
+                http: (ctx) => {
+                	if(!ctx.req.body) {
+                		return;
+                	}
+
+                	if(!ctx.req.body.url) {
+                		return;
+                	}
+
+					return ctx.req.body.url;
+				}
+			}, {
+				arg: 'base64',
+				type: 'string',
+				default: false,
+                http: (ctx) => {
+                	if(!ctx.req.body) {
+                		return;
+                	}
+
+                	if(!ctx.req.body.base64) {
+                		return;
+                	}
+
+					return ctx.req.body.base64;
+				}
+			}, {
+				arg: 'overwrite',
+				type: 'boolean',
+				default: false,
+                http: (ctx) => {
+                	if(!ctx.req.body) {
+                		return false;
+                	}
+
+                	if(!ctx.req.body.overwrite) {
+                		return false;
+                	}
+
+					return ctx.req.body.overwrite;
+				}
+			}, {
+				arg: 'body',
+				type: 'object',
+				required: true,
+                http: {
+                	source: 'body'
+                }
+			}],
+			http: {
+				path: '/download',
+				verb: 'post'
+			},
+			returns: [{
+                arg: 'url',
+                type: 'object',
+                root: true
+            }]
+		}
+	);
+};
