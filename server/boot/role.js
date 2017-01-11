@@ -3,29 +3,23 @@ let moment = require('moment');
 module.exports = (app) => {
 	let Role = app.models.Role;
 	// customer owner role resolver.
-	Role.registerResolver('$token', (role, context, cb) => {
-		let AuthHeader = ctx.res.getHeader('Authorization');
+	Role.registerResolver('$token', (role, ctx, cb) => {
+		let headers = ctx.remotingContext.req.headers;
 
-		if(!AuthHeader) {
+		if(!headers.hasOwnProperty('authorization')) {
+			return process.nextTick(() => cb(null, false));
+		}
+
+		let AuthToken = headers.authorization;
+
+		if(!AuthToken) {
             return process.nextTick(() => cb(null, false));
 		}
 
-		let Token = app.models.Token;
-		Token.findOne({
-			where: {
-				token: authHeader,
-				expires: {
-					lt: moment()
-				}
-			}
-		})
-		.then(result => {
-			if(!result) {
-	            return process.nextTick(() => cb(null, false));
-			}
+		if(AuthToken === process.env.AUTH_TOKEN) {
+			return cb(null, true);
+		}
 
-
-            return cb(null, true);
-		})
+        return cb(null, false);
 	});
 }

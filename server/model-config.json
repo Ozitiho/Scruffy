@@ -17,12 +17,16 @@
     "dataSource": "memory",
     "public": true
   },
-  "Role": {
+  "AccessToken": {
     "dataSource": "memory",
     "public": false
   },
-  "Token": {
+  "ACL": {
     "dataSource": "memory",
-    "public": true
+    "public": false
+  },
+  "Role": {
+    "dataSource": "memory",
+    "public": false
   }
 }
