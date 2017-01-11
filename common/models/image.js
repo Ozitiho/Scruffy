@@ -151,7 +151,7 @@ module.exports = function(Image) {
 					}
 
 					let fileUrl = data.folder + '/' + data.name + '.' + data.extention;
-					return resolve({url: '/api/image/' + fileUrl});
+					return resolve({url: process.env.BASE_URL + '/api/image/' + fileUrl});
 				});
 			});
 		});
@@ -172,7 +172,7 @@ module.exports = function(Image) {
 				}
 
 				let fileUrl = data.folder + '/' + data.name + '.' + data.extention;
-				return resolve({url: '/api/image/' + fileUrl});
+				return resolve({url: process.env.BASE_URL + '/api/image/' + fileUrl});
 			});
 		});
 	};
