@@ -145,6 +145,10 @@ module.exports = function(Image) {
 	Image.downloadUrlImage = (url, data) => {
 		return new Promise((resolve, reject) => {
 			http.get(url, (err, response) => {
+				if(err) {
+					return reject(err);
+				}
+
 				if(!response || !response.raw) {
 					let err = new Error("No response from image url.");
 					err.status = 500;
