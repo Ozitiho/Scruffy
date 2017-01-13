@@ -4,9 +4,10 @@ let fs = require('fs');
 let	mime = require('mime');
 let	path = require('path');
 let gm = require('gm').subClass({imageMagick: true});
-let http = require('needle');
+let http = require('needle-retry');
 let url = require('url');
 let _ = require('lodash');
+let random_ua = require('random-ua');
 
 let rootImagesFolder = loopback.get('rootImagesFolder') ? loopback.get('rootImagesFolder') : '/images';
 let allowedExtentions = loopback.get('allowedExtentions');
@@ -65,7 +66,7 @@ module.exports = function(Image) {
 		});
 	};
 
-	Image.download = (folder, name, url, base64, overwrite = false) => {
+	Image.download = (folder, name, url, base64, overwrite = false, proxy = false) => {
 		return new Promise((resolve, reject) => {
 			if(!fs.existsSync(rootImagesFolder)) {
 				let err = new Error("Base path does not exist, create it before running. (" + rootImagesFolder + ")")
@@ -89,7 +90,12 @@ module.exports = function(Image) {
 				Image.preCheck(folder, name, overwrite)
 				.then(data => {
 					if(url) {
-						return resolve(Image.downloadUrlImage(url, data));
+						if(proxy) {
+							return resolve(Image.downloadUrlImageProxy(url, data));
+						}
+						else {
+							return resolve(Image.downloadUrlImage(url, data));
+						}
 					}
 					else if(base64) {
 						return resolve(Image.downloadBase64Image(base64, data));
@@ -120,6 +126,7 @@ module.exports = function(Image) {
 				return reject(err);
 			}
 
+			name = name.join('.');
 			var directoryLocation = path.resolve(rootImagesFolder, folder);
 			let fileLocation = path.resolve(directoryLocation, (name + '.' + extention));
 			if(fs.existsSync(fileLocation) && !overwrite){
@@ -133,7 +140,7 @@ module.exports = function(Image) {
 			}
 
 			return resolve({
-				name: name.join('.'),
+				name: name,
 				extention: extention,
 				folder: folder,
 				folderPath: directoryLocation,
@@ -164,6 +171,62 @@ module.exports = function(Image) {
 					return resolve({url: process.env.BASE_URL + '/api/image/' + fileUrl});
 				});
 			});
+		});
+	};
+
+	Image.downloadUrlImageProxy = (url, data) => {
+		return new Promise((resolve, reject) => {
+			let Proxy = loopback.models.Proxy;
+
+			Proxy.count()
+			.then(count => {
+				return Proxy.find({
+					limit: 10,
+					skip: parseInt(Math.random() * ((count-10) - 1) + 1)
+				})
+			})
+			.then(proxies => {
+				proxies = _.map(proxies, proxy => {
+					proxy = proxy.toJSON();
+					return proxy.protocol + '://' + proxy.host + ':' + proxy.port;
+				});
+
+				let retryErrors = ["ECONNRESET", "ECONNREFUSED"];
+
+				let options = {
+					user_agent: random_ua.generate(),
+					proxy: proxies,
+					follow_max: 5,
+					compressed: true,
+					open_timeout: 5000,
+					read_timeout: 1000
+				};
+
+				http.get(url, options, (err, response) => {
+					if(err) {
+						if(retryErrors.indexOf(err.code) >= 0)
+						{
+							return resolve(Image.downloadUrlImageProxy(url, data));
+						}
+						return reject(err);
+					}
+
+					if(!response || !response.raw) {
+						let err = new Error("No response from image url.");
+						err.status = 500;
+						return reject(err)
+					}
+
+					fs.writeFile(data.filePath, response.raw, (err) => {
+						if(err) {
+							return reject(err);
+						}
+
+						let fileUrl = data.folder + '/' + data.name + '.' + data.extention;
+						return resolve({url: process.env.BASE_URL + '/api/image/' + fileUrl});
+					});
+				});
+			}, err => reject(err));
 		});
 	};
 
@@ -303,6 +366,21 @@ module.exports = function(Image) {
                 	}
 
 					return ctx.req.body.overwrite;
+				}
+			}, {
+				arg: 'proxy',
+				type: 'boolean',
+				default: false,
+                http: (ctx) => {
+                	if(!ctx.req.body) {
+                		return false;
+                	}
+
+                	if(!ctx.req.body.proxy) {
+                		return false;
+                	}
+
+					return ctx.req.body.proxy;
 				}
 			}, {
 				arg: 'body',

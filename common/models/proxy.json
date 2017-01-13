@@ -1,0 +1,31 @@
+{
+  "name": "Proxy",
+  "plural": "Proxies",
+  "base": "PersistedModel",
+  "idInjection": true,
+  "options": {
+    "validateUpsert": true
+  },
+  "properties": {
+    "host": {
+      "type": "string",
+      "required": true
+    },
+    "protocol": {
+      "type": "string",
+      "required": true
+    },
+    "port": {
+      "type": "number",
+      "required": true
+    },
+    "speed": {
+      "type": "number",
+      "required": true
+    }
+  },
+  "validations": [],
+  "relations": {},
+  "acls": [],
+  "methods": {}
+}

@@ -10,6 +10,8 @@
 *.swp
 *.tgz
 *.xml
+.node-gyp
+memory.json
 .npm
 .DS_Store
 .idea

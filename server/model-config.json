@@ -28,5 +28,9 @@
   "Role": {
     "dataSource": "memory",
     "public": false
+  },
+  "Proxy": {
+    "dataSource": "memory",
+    "public": true
   }
 }
